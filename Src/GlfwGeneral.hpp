@@ -20,6 +20,8 @@ const char* windowTitle = "learnEasyVK";
  * limitFrameRate: 指定是否将帧数限制到不超过屏幕刷新率，在本节先不实现这个参数的作用
  */
 bool InitializeWindow(VkExtent2D size, bool fullScreen = false, bool isResizable = true, bool limitFrameRate = true) {
+    using namespace vulkan;
+
     if (!glfwInit()) {
         std::cout << std::format("[ InitializeWindow ] ERROR\nFailed to initialize GLFW!\n");
         return false;
@@ -50,6 +52,50 @@ bool InitializeWindow(VkExtent2D size, bool fullScreen = false, bool isResizable
         glfwTerminate();
         return false;
     }
+
+    uint32_t extensionCount = 0;
+    /*
+     * 不需要手动 delete extensionNames，GLFW的注释及官方文档中写到：
+     * The returned array is allocated and freed by GLFW.
+     * You should not free it yourself. It is guaranteed to be valid only until the library is terminated.
+     * 在Windows上取得的扩展名称有两个，"VK_KHR_surface"（宏VK_KHR_SURFACE_EXTENSION_NAME）
+     * 和"VK_KHR_win32_surface"（宏VK_KHR_WIN32_SURFACE_EXTENSION_NAME）
+     */
+    const char** extensionNames;
+    extensionNames = glfwGetRequiredInstanceExtensions(&extensionCount);
+    if (!extensionNames) {
+        std::cout << std::format("[ InitializeWindow ]\nVulkan is not available on this machine!\n");
+        glfwTerminate();
+        return false;
+    }
+    for (size_t i = 0; i < extensionCount; i++)
+        graphicsBase::Base().AddInstanceExtension(extensionNames[i]);
+
+    // 设备级别扩展
+    graphicsBase::Base().AddDeviceExtension(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+    //在创建window surface前创建Vulkan实例
+    graphicsBase::Base().UseLatestApiVersion();
+    if (graphicsBase::Base().CreateInstance())
+        return false;
+
+    VkSurfaceKHR surface = VK_NULL_HANDLE;
+    if (VkResult result = glfwCreateWindowSurface(graphicsBase::Base().Instance(), pWindow, nullptr, &surface)) {
+        std::cout << std::format("[ InitializeWindow ] ERROR\nFailed to create a window surface!\nError code: {}\n", string_VkResult(result));
+        glfwTerminate();
+        return false;
+    }
+    graphicsBase::Base().Surface(surface);
+    //通过用||操作符短路执行来省去几行
+    if (//获取物理设备，并使用列表中的第一个物理设备，这里不考虑以下任意函数失败后更换物理设备的情况
+        graphicsBase::Base().GetPhysicalDevices() ||
+        //一个true一个false，暂时不需要计算用的队列
+        graphicsBase::Base().DeterminePhysicalDevice(0, true, false) ||
+        //创建逻辑设备
+        graphicsBase::Base().CreateDevice())
+        return false;
+    //----------------------------------------
+
+    /*待Ch1-4填充*/
     return true;
 }
 
