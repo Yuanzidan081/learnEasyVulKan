@@ -97,7 +97,6 @@ namespace vulkan {
             }
             //该函数用于创建Vulkan实例
             VkResult CreateInstance(VkInstanceCreateFlags flags = 0) {
-                /*待Ch1-3填充*/
                 // 仅在编译选项为DEBUG时，在instanceLayers和instanceExtensions尾部加上所需的名称。
                 #ifndef NDEBUG
                     // VK_LAYER_KHRONOS_validation：验证层，找出API错误、同步错误、资源生命周期bug
