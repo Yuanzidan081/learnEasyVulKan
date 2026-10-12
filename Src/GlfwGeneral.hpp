@@ -95,7 +95,8 @@ bool InitializeWindow(VkExtent2D size, bool fullScreen = false, bool isResizable
         return false;
     //----------------------------------------
 
-    /*待Ch1-4填充*/
+    if (graphicsBase::Base().CreateSwapchain(limitFrameRate))
+        return false;
     return true;
 }
 
@@ -103,7 +104,8 @@ bool InitializeWindow(VkExtent2D size, bool fullScreen = false, bool isResizable
  * TerminateWindow: 终止窗口时，清理GLFW
  */
 void TerminateWindow() {
-/* 待后续填充 */
+    using namespace vulkan;
+    graphicsBase::Base().WaitIdle();
     glfwTerminate();
 }
 
