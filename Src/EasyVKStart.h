@@ -33,3 +33,42 @@
 #endif
 #include <vulkan/vulkan.h>
 #include <vulkan/vk_enum_string_helper.h> //用于将枚举项转为对应的字符串，方便输出错误信息等
+
+template<typename T>
+class arrayRef {
+    T* const pArray = nullptr;
+    size_t count = 0;
+public:
+    arrayRef() = default;
+    arrayRef(T& data) :pArray(&data), count(1) {}
+    template<size_t elementCount>
+    arrayRef(T(&data)[elementCount]) : pArray(data), count(elementCount) {}
+    arrayRef(T* pData, size_t elementCount) :pArray(pData), count(elementCount) {}
+    arrayRef(const arrayRef<std::remove_const_t<T>>& other) :pArray(other.Pointer()), count(other.Count()) {}
+    //Getter
+    T* Pointer() const { return pArray; }
+    size_t Count() const { return count; }
+    //Const Function
+    T& operator[](size_t index) const { return pArray[index]; }
+    T* begin() const { return pArray; }
+    T* end() const { return pArray + count; }
+    //Non-const Function
+    arrayRef& operator=(const arrayRef&) = delete;
+};
+
+/*
+ * 以上代码中arrayRef不支持直接从底层内存连续的标准库容器构造，而std::vector又用得尤其多。
+ * 直接从符合要求的标准库容器构造的修改
+ template<typename R>
+ arrayRef(R&& range) requires requires(R r) {
+     requires std::ranges::contiguous_range<R>;
+     requires std::ranges::sized_range<R>;
+     requires std::ranges::borrowed_range<R>;
+     requires std::convertible_to<decltype(std::ranges::data(r)), T*>;
+     requires sizeof(std::iter_value_t<R>) == sizeof(T);
+ } :pArray(std::ranges::data(range)), count(std::ranges::size(range)) {}
+ */
+// ExecuteOnce宏：用来把函数分割成能被多次执行，以及只执行一次的两个部分
+// 这个宏能如同函数般被使用，在其之上的部分可以被多次执行，在其之下的部分只会被执行一次，
+// 如果在其之下的部分已经执行过了，那么就直接返回括号中的参数。
+#define ExecuteOnce(...) { static bool executed = false; if (executed) return __VA_ARGS__; executed = true; }

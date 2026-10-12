@@ -1,9 +1,101 @@
 #pragma once
 // 用来写Vulkan相关的基本内容。
 #include "EasyVKStart.h"
+#define VK_RESULT_THROW
+
+// DestroyHandleBy宏：调用相应vkDestroy函数后将handle设置为VK_NULL_HANDLE，以防止重复析构
+#define DestroyHandleBy(Func) if (handle) { Func(graphicsBase::Base().Device(), handle, nullptr); handle = VK_NULL_HANDLE; }
+// MoveHandle宏：用于移动构造器中的宏，该宏复制来自另一对象的handle后，将另一对象的handle设置为VK_NULL_HANDLE，转移析构权限
+#define MoveHandle handle = other.handle; other.handle = VK_NULL_HANDLE;
+// 移动赋值
+// #define DefineMoveAssignmentOperator(type) type& operator=(type&& other) { this->~type(); MoveHandle; return *this; }
+// DefineHandleTypeOperator宏：通过返回handle将封装类型对象隐式转换到被封装handle的原始类型
+// 不要写做operator decltype(handle)写成operator auto，的类型转换函数不能在派生类中被using重访问！
+#define DefineHandleTypeOperator operator decltype(handle)() const { return handle; }
+// DefineAddressFunction宏：用于取得被封装handle的地址
+#define DefineAddressFunction const decltype(handle)* Address() const { return &handle; }
+
+
+// 为了把预编译指令#ifdef的分支改成常量表达式if语句if constexpr分支
+// 使得代码会被编译器诊断，并且在Visual Studio中总是维持正常的代码着色
+#ifndef NDEBUG
+#define ENABLE_DEBUG_MESSENGER true
+#else
+#define ENABLE_DEBUG_MESSENGER false
+#endif
+
+
 //定义vulkan命名空间，之后会把Vulkan中一些基本对象的封装写在其中
 namespace vulkan {
     constexpr VkExtent2D defaultWindowSize = { 1280, 720 };
+    inline auto& outStream = std::cout; //不是constexpr，因为std::cout具有外部链接
+    /*
+     * 没有控制台日志打印可以类似
+     constexpr struct outStream_t {
+         static std::stringstream ss;
+         struct returnedStream_t {
+             returnedStream_t operator<<(const std::string& string) const {
+                 ss << string;
+                 return {};
+             }
+         };
+         returnedStream_t operator<<(const std::string& string) const {
+             ss.clear();
+             ss << string;
+             return {};
+         }
+     } outStream;
+     inline std::stringstream outStream_t::ss;
+     */
+    //情况1：根据函数返回值确定是否抛异常
+    #ifdef VK_RESULT_THROW
+    class result_t {
+        VkResult result;
+    public:
+        // callback_throw是回调函数的指针，因为光是抛出异常可能不够，你可能想在抛出异常前干某些事，
+        // 比如输出错误代码（不过光有错误代码难以知道问题出在哪，这一点会在本节的后文中得到解决）。
+        static void(*callback_throw)(VkResult);
+        result_t(VkResult result) :result(result) {}
+        result_t(result_t&& other) noexcept :result(other.result) { other.result = VK_SUCCESS; }
+        ~result_t() noexcept(false) {
+            if (uint32_t(result) < VK_RESULT_MAX_ENUM)
+                return;
+            if (callback_throw)
+                callback_throw(result);
+            throw result;
+        }
+        // 当一个result_t中的result被处理时，由于result_t无法被直接转到bool或整型，必定会执行operator VkResult()，
+        // 也就是说：若一个result_t类型对象在析构时仍旧保有一个错误代码，那么说明错误没有得到任何处理，抛出异常。
+        operator VkResult() {
+            VkResult result = this->result;
+            this->result = VK_SUCCESS;
+            return result;
+        }
+    };
+    inline void(*result_t::callback_throw)(VkResult);
+    /*
+     * callback_throw示例：错误有windows弹窗
+     * 需要windows.h和Win32窗口，hWindow是窗口的handle
+     result_t::callback_throw = [](VkResult) {
+         MessageBoxA(hWindow, outStream.ss.str().c_str(), nullptr, MB_OK);
+     };
+     */
+
+    //情况2：若抛弃函数返回值，让编译器发出警告
+    #elifdef VK_RESULT_NODISCARD
+    struct [[nodiscard]] result_t {
+        VkResult result;
+        result_t(VkResult result) :result(result) {}
+        operator VkResult() const { return result; }
+    };
+    //在本文件中关闭弃值提醒（因为我懒得做处理）
+    #pragma warning(disable:4834)
+    #pragma warning(disable:6031)
+
+    //情况3：啥都不干
+    #else
+    using result_t = VkResult;
+    #endif
     /*
      * 单例类graphicsBase
      * 作用：管理Vulkan中最基础的对象和行为
@@ -134,12 +226,11 @@ namespace vulkan {
             //该函数用于创建Vulkan实例
             VkResult CreateInstance(VkInstanceCreateFlags flags = 0) {
                 // 仅在编译选项为DEBUG时，在instanceLayers和instanceExtensions尾部加上所需的名称。
-                #ifndef NDEBUG
+                if constexpr (ENABLE_DEBUG_MESSENGER)
                     // VK_LAYER_KHRONOS_validation：验证层，找出API错误、同步错误、资源生命周期bug
-                    AddInstanceLayer("VK_LAYER_KHRONOS_validation");
+                    AddInstanceLayer("VK_LAYER_KHRONOS_validation"),
                     // VK_EXT_DEBUG_UTILS_EXTENSION_NAME：接收验证层的报错消息、给 Vulkan 对象命名、给命令缓冲打标签，方便调试和 RenderDoc 抓帧看信息
                     AddInstanceExtension(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-                #endif
                 VkApplicationInfo applicationInfo = {
                     .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
                     .apiVersion = apiVersion
@@ -166,10 +257,9 @@ namespace vulkan {
                     VK_API_VERSION_MAJOR(apiVersion),
                     VK_API_VERSION_MINOR(apiVersion),
                     VK_API_VERSION_PATCH(apiVersion));
-                #ifndef NDEBUG
+                if constexpr (ENABLE_DEBUG_MESSENGER)
                     //创建完Vulkan实例后紧接着创建debug messenger
                     CreateDebugMessenger();
-                #endif
                 return VK_SUCCESS;
             }
             //以下函数用于创建Vulkan实例失败后
